@@ -5,6 +5,7 @@ import pytest
 from app.models.user_context import UserContext
 from app.routing.persona import Persona
 from app.routing.router import PersonaRouter
+from app.routing.workspace import Workspace
 
 
 @pytest.fixture
@@ -16,15 +17,15 @@ def router() -> PersonaRouter:
 @pytest.mark.parametrize(
     ("persona", "expected_workspace"),
     [
-        (Persona.BUSINESS, "business"),
-        (Persona.CUSTOMER, "customer"),
-        (Persona.DEVELOPER, "developer"),
+        (Persona.BUSINESS, Workspace.BUSINESS),
+        (Persona.CUSTOMER, Workspace.CUSTOMER),
+        (Persona.DEVELOPER, Workspace.DEVELOPER),
     ],
 )
 def test_routes_persona_to_workspace(
     router: PersonaRouter,
     persona: Persona,
-    expected_workspace: str,
+    expected_workspace: Workspace,
 ) -> None:
     """Verify that each persona maps to the correct workspace."""
     context = UserContext(
