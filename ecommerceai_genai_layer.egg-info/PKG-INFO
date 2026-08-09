@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: ecommerceai-genai-layer
+Version: 0.1.0
+Summary: AI orchestration layer for CommerceAI using LangGraph, RAG, and intelligent workflows.
+Requires-Python: >=3.11
+Requires-Dist: pydantic>=2.0
