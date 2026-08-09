@@ -2,18 +2,19 @@
 
 from app.models.user_context import UserContext
 from app.routing.persona import Persona
+from app.routing.workspace import Workspace
 
 
 class PersonaRouter:
-    """Routes requests to the appropriate user workspace."""
+    """Routes users to the appropriate GenAI workspace."""
 
     _WORKSPACE_MAP = {
-        Persona.BUSINESS: "business",
-        Persona.CUSTOMER: "customer",
-        Persona.DEVELOPER: "developer",
+        Persona.BUSINESS: Workspace.BUSINESS,
+        Persona.CUSTOMER: Workspace.CUSTOMER,
+        Persona.DEVELOPER: Workspace.DEVELOPER,
     }
 
-    def route(self, context: UserContext) -> str:
+    def route(self, context: UserContext) -> Workspace:
         """
         Return the workspace associated with the user's persona.
 
@@ -21,7 +22,7 @@ class PersonaRouter:
             context: Authenticated user context.
 
         Returns:
-            Workspace identifier.
+            Workspace assigned to the user's persona.
 
         Raises:
             ValueError: If no workspace is configured for the persona.
