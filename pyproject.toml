@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "AI orchestration layer for CommerceAI using LangGraph, RAG, and intelligent workflows."
 requires-python = ">=3.11"
 dependencies = [
+    "langgraph>=1.2.10",
     "pydantic>=2.0",
 ]
 
