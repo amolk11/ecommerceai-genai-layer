@@ -17,12 +17,17 @@ class StateFactory:
         Workspace.DEVELOPER: DeveloperState,
     }
 
-    def create(self, context: RequestContext) -> BaseGenAIState:
+    def create(
+        self,
+        context: RequestContext,
+        workspace: Workspace,
+    ) -> BaseGenAIState:
         """
-        Create workflow state for the user's workspace.
+        Create workflow state for the resolved workspace.
 
         Args:
             context: Internal request context.
+            workspace: Workspace resolved by the persona router.
 
         Returns:
             Persona-specific GenAI workflow state.
@@ -30,30 +35,15 @@ class StateFactory:
         Raises:
             ValueError: If no state is configured for the workspace.
         """
-        state_class = self._STATE_MAP.get(context.user.persona)
+        state_class = self._STATE_MAP.get(workspace)
 
         if state_class is None:
             raise ValueError(
-                f"No state configured for persona: {context.user.persona}"
+                f"No state configured for workspace: {workspace}"
             )
 
         return state_class(
             context=context,
-            workspace=self._workspace_for(context),
+            workspace=workspace,
         )
-
-    @staticmethod
-    def _workspace_for(context: RequestContext) -> Workspace:
-        """Resolve the workspace associated with the user's persona."""
-        workspace_map = {
-            "business": Workspace.BUSINESS,
-            "customer": Workspace.CUSTOMER,
-            "developer": Workspace.DEVELOPER,
-        }
-
-        try:
-            return workspace_map[context.user.persona.value]
-        except KeyError as exc:
-            raise ValueError(
-                f"No workspace configured for persona: {context.user.persona}"
-            ) from exc
+        
