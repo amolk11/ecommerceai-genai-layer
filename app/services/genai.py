@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from app.models.request_context import RequestContext
+from app.errors import AuthorizationError, WorkflowNotFoundError
 from app.routing.router import PersonaRouter
 from app.routing.workspace import Workspace
 from app.state.base import BaseGenAIState
@@ -40,10 +41,16 @@ class GenAIService:
     def handle(self, context: RequestContext) -> WorkflowResult:
         """Route, authorize, execute, and return the request's workflow state."""
         workspace = self._router.route(context.user)
-        self._authorizer.authorize_persona(context.user.persona, workspace)
+        try:
+            self._authorizer.authorize_persona(context.user.persona, workspace)
+        except PermissionError as exc:
+            raise AuthorizationError(exc) from exc
 
         state = self._state_factory.create(context, workspace)
-        workflow = self._registry.get(workspace)
+        try:
+            workflow = self._registry.get(workspace)
+        except ValueError as exc:
+            raise WorkflowNotFoundError(exc) from exc
         output = workflow.invoke(state)
 
         return WorkflowResult(

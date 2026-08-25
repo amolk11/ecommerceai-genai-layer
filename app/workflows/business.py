@@ -1,12 +1,16 @@
 """Business workspace workflow."""
 
 from langgraph.graph import END, START, StateGraph
+from pydantic import ValidationError
 
 from app.context.protocols import BusinessContextProvider
+from app.errors import ContextProviderError, LLMProviderError, StructuredOutputError
 from app.llm.protocols import BusinessLLM
 from app.models.business_insight import BusinessInsight
 from app.prompts.business import build_business_intelligence_prompt
 from app.state.business import BusinessState
+from app.observability import elapsed_ms, log_event
+from time import perf_counter
 
 
 def initialize(state: BusinessState) -> BusinessState:
@@ -18,7 +22,13 @@ def build_business_context(
     state: BusinessState, context_provider: BusinessContextProvider
 ) -> BusinessState:
     """Load the compact PostgreSQL-backed context for the business user."""
-    state.business_context = context_provider.build(state.context.user.user_id)
+    started = perf_counter()
+    try:
+        state.business_context = context_provider.build(state.context.user.user_id)
+    except Exception as exc:
+        log_event("request_failed", error_code=ContextProviderError.code)
+        raise ContextProviderError(exc) from exc
+    log_event("context_loaded", duration_ms=elapsed_ms(started), success=True)
     return state
 
 
@@ -29,7 +39,19 @@ def business_intelligence(state: BusinessState, llm: BusinessLLM) -> BusinessSta
     prompt = build_business_intelligence_prompt(
         state.context.request.message, state.business_context
     )
-    state.insight = BusinessInsight.model_validate(llm.generate_business_insight(prompt))
+    started = perf_counter()
+    log_event("llm_started")
+    try:
+        output = llm.generate_business_insight(prompt)
+    except Exception as exc:
+        log_event("request_failed", error_code=LLMProviderError.code)
+        raise LLMProviderError(exc) from exc
+    try:
+        state.insight = BusinessInsight.model_validate(output)
+    except ValidationError as exc:
+        log_event("request_failed", error_code=StructuredOutputError.code)
+        raise
+    log_event("llm_completed", duration_ms=elapsed_ms(started), success=True)
     return state
 
 

@@ -13,4 +13,3 @@ class RequestContext(BaseModel):
 
     user: UserContext
     request: GenAIRequest
-    
