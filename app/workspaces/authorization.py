@@ -1,6 +1,7 @@
 """Workspace capability authorization."""
 
 from app.routing.workspace import Workspace
+from app.routing.persona import Persona
 from app.workspaces.capabilities import Capability
 from app.workspaces.policy import WORKSPACE_CAPABILITIES
 
@@ -31,4 +32,12 @@ class WorkspaceAuthorizer:
             raise PermissionError(
                 f"Workspace '{workspace.value}' does not have "
                 f"capability '{capability.value}'."
+            )
+
+    def authorize_persona(self, persona: Persona, workspace: Workspace) -> None:
+        """Require a persona to execute only in its assigned workspace."""
+        if persona.value != workspace.value:
+            raise PermissionError(
+                f"Persona '{persona.value}' is not authorized for "
+                f"workspace '{workspace.value}'."
             )

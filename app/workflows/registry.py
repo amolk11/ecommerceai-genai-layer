@@ -1,9 +1,5 @@
 """Registry for GenAI workflows."""
 
-from typing import Any
-
-from traitlets import Any
-
 from app.workflows.protocols import Workflow
 from app.routing.workspace import Workspace
 
@@ -18,7 +14,7 @@ class WorkflowRegistry:
         """Register a workflow for a workspace."""
         self._workflows[workspace] = workflow
 
-    def get(self, workspace: Workspace) -> Workflow :
+    def get(self, workspace: Workspace) -> Workflow:
         """Return the workflow registered for a workspace."""
         try:
             return self._workflows[workspace]
@@ -26,4 +22,3 @@ class WorkflowRegistry:
             raise ValueError(
                 f"No workflow registered for workspace: {workspace}"
             ) from exc
-            
