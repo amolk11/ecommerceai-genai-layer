@@ -49,6 +49,19 @@ class LLMProviderError(ApplicationError):
     status_code = 502
 
 
+class LLMConfigurationError(ApplicationError, RuntimeError):
+    """A configured LLM provider cannot be safely initialized."""
+
+    code = "LLM_CONFIGURATION_ERROR"
+    public_message = "The AI service is not configured."
+    status_code = 503
+
+    def __init__(self, internal_message: str) -> None:
+        """Retain a useful service-level message without exposing it at HTTP boundaries."""
+        super().__init__()
+        self.args = (internal_message,)
+
+
 class StructuredOutputError(ApplicationError):
     code = "STRUCTURED_OUTPUT_ERROR"
     public_message = "The AI service returned an invalid structured response."

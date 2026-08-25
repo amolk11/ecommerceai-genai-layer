@@ -1,23 +1,36 @@
 """OpenAI Responses API implementation of the business LLM boundary."""
 
 import json
-from typing import Any
+from collections.abc import Callable
+from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from pydantic import ValidationError
 
-from app.llm.config import OpenAISettings
 from app.models.business_insight import BusinessInsight
 
 
-class OpenAIResponsesBusinessLLM:
-    """Generate structured business insights through the OpenAI Responses API."""
+class ResponsesSettings(Protocol):
+    """The credentials and model required by OpenAI-compatible Responses APIs."""
 
-    _URL = "https://api.openai.com/v1/responses"
+    api_key: str
+    model: str
 
-    def __init__(self, settings: OpenAISettings) -> None:
+
+class OpenAICompatibleResponsesBusinessLLM:
+    """Shared structured-output adapter for OpenAI-compatible Responses APIs."""
+
+    _URL: str
+    _provider_name: str
+
+    def __init__(
+        self,
+        settings: ResponsesSettings,
+        request_opener: Callable[..., Any] = urlopen,
+    ) -> None:
         self._settings = settings
+        self._request_opener = request_opener
 
     def generate_business_insight(self, prompt: str) -> BusinessInsight:
         """Request and validate a JSON-schema constrained business insight."""
@@ -44,19 +57,19 @@ class OpenAIResponsesBusinessLLM:
         )
 
         try:
-            with urlopen(request, timeout=30) as response:
+            with self._request_opener(request, timeout=30) as response:
                 body: dict[str, Any] = json.loads(response.read())
         except HTTPError as exc:
-            raise RuntimeError(f"OpenAI LLM request failed with status {exc.code}.") from exc
+            raise RuntimeError(f"{self._provider_name} LLM request failed with status {exc.code}.") from exc
         except URLError as exc:
-            raise RuntimeError("OpenAI LLM is unavailable.") from exc
+            raise RuntimeError(f"{self._provider_name} LLM is unavailable.") from exc
         except OSError as exc:
-            raise RuntimeError("OpenAI LLM invocation failed.") from exc
+            raise RuntimeError(f"{self._provider_name} LLM invocation failed.") from exc
 
         try:
             return BusinessInsight.model_validate_json(self._output_text(body))
         except (KeyError, TypeError, json.JSONDecodeError, ValidationError) as exc:
-            raise ValueError("OpenAI LLM returned an invalid business insight.") from exc
+            raise ValueError(f"{self._provider_name} LLM returned an invalid business insight.") from exc
 
     @staticmethod
     def _output_text(body: dict[str, Any]) -> str:
@@ -66,3 +79,10 @@ class OpenAIResponsesBusinessLLM:
                 if content.get("type") == "output_text":
                     return content["text"]
         raise KeyError("No output_text content was returned.")
+
+
+class OpenAIResponsesBusinessLLM(OpenAICompatibleResponsesBusinessLLM):
+    """Generate structured business insights through the OpenAI Responses API."""
+
+    _URL = "https://api.openai.com/v1/responses"
+    _provider_name = "OpenAI"

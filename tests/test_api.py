@@ -91,6 +91,35 @@ def test_health_is_live_without_workflow_execution() -> None:
     assert llm.prompts == []
 
 
+def test_default_app_import_and_health_do_not_require_an_openrouter_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The default composition defers provider configuration until a GenAI request."""
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
+
+    response = TestClient(create_app()).get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_missing_openrouter_configuration_is_a_safe_api_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Configuration is explicit for service callers but never exposes a key via HTTP."""
+    monkeypatch.setenv("LLM_PROVIDER", "openrouter")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
+
+    response = TestClient(create_app()).post("/v1/genai", json=business_payload())
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "LLM_CONFIGURATION_ERROR"
+    assert response.json()["error"]["message"] == "The AI service is not configured."
+    assert "OPENROUTER_API_KEY" not in response.text
+
+
 def test_invalid_request_is_rejected_by_the_typed_boundary() -> None:
     """Pydantic request validation rejects malformed HTTP payloads before execution."""
     client, provider, llm = client_with_business_dependencies()

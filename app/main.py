@@ -55,7 +55,7 @@ def create_app(
     HTTP delegates to GenAIApplication; authorization, workflows, context retrieval,
     and LLM execution remain in their existing layers. Readiness only checks PostgreSQL.
     """
-    application = GenAIApplication(service or create_genai_service())
+    application = GenAIApplication(service=service, service_factory=None if service else create_genai_service)
     check_readiness = readiness_check or create_readiness_check()
     app = FastAPI(title="EcommerceAI GenAI Layer", version="1.0.0")
 
@@ -135,3 +135,6 @@ def create_app(
         )
 
     return app
+
+
+app = create_app()
