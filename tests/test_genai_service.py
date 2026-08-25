@@ -4,6 +4,12 @@ import pytest
 
 from app.bootstrap import create_genai_service
 from app.models.business_insight import BusinessInsight
+from app.models.business_context import (
+    BusinessContext,
+    CustomerBehavioralIntelligence,
+    CustomerBusinessOverview,
+    DataAvailabilityMetadata,
+)
 from app.models.request import GenAIRequest
 from app.models.request_context import RequestContext
 from app.models.user_context import UserContext
@@ -24,6 +30,19 @@ class FakeBusinessLLM:
             summary="Test insight",
             key_points=["Test point"],
             recommended_actions=["Test action"],
+        )
+
+
+class FakeBusinessContextProvider:
+    """Context-provider double used to keep service tests database-free."""
+
+    def build(self, user_id: str) -> BusinessContext:
+        return BusinessContext(
+            customer_overview=CustomerBusinessOverview(user_id=user_id),
+            behavioral_intelligence=CustomerBehavioralIntelligence(),
+            data_availability=DataAvailabilityMetadata(
+                product_limit=5, recommendation_limit=5
+            ),
         )
 
 
@@ -49,7 +68,9 @@ def test_service_executes_the_persona_specific_workflow(
     state_type: type[BusinessState | CustomerState | DeveloperState],
 ) -> None:
     """A request reaches its mapped workspace graph with the correct state."""
-    result = create_genai_service(FakeBusinessLLM()).handle(make_context(persona))
+    result = create_genai_service(
+        FakeBusinessLLM(), FakeBusinessContextProvider()
+    ).handle(make_context(persona))
 
     assert result.workspace is workspace
     assert isinstance(result.state, state_type)

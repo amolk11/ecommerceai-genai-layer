@@ -6,6 +6,12 @@ from pydantic import ValidationError
 from app.bootstrap import create_genai_service
 from app.llm.config import OpenAISettings
 from app.models.business_insight import BusinessInsight
+from app.models.business_context import (
+    BusinessContext,
+    CustomerBehavioralIntelligence,
+    CustomerBusinessOverview,
+    DataAvailabilityMetadata,
+)
 from app.models.request import GenAIRequest
 from app.models.request_context import RequestContext
 from app.models.user_context import UserContext
@@ -45,11 +51,36 @@ class InvalidBusinessLLM:
         return {"summary": "Missing required fields"}
 
 
+class FakeBusinessContextProvider:
+    """Database-free context provider for Business workflow tests."""
+
+    def build(self, user_id: str) -> BusinessContext:
+        return BusinessContext(
+            customer_overview=CustomerBusinessOverview(
+                user_id=user_id,
+                observed_profile={"total_orders": 12},
+            ),
+            behavioral_intelligence=CustomerBehavioralIntelligence(
+                observed_behavior={"reorder_rate": 0.4},
+                model_derived_scores={"retention_score": 0.8},
+                segments={"segment": "loyal"},
+            ),
+            data_availability=DataAvailabilityMetadata(
+                serving_sources=["serving.customer_profile"],
+                analytics_sources=["analytics.customer_behavior"],
+                product_limit=5,
+                recommendation_limit=5,
+            ),
+        )
+
+
 def test_business_service_returns_a_structured_insight() -> None:
     """A Business request reaches the injected LLM and returns its insight."""
     llm = RecordingBusinessLLM()
 
-    result = create_genai_service(llm).handle(business_context())
+    result = create_genai_service(llm, FakeBusinessContextProvider()).handle(
+        business_context()
+    )
 
     assert isinstance(result.state, BusinessState)
     assert result.state.insight is not None
@@ -63,13 +94,14 @@ def test_business_service_returns_a_structured_insight() -> None:
     ]
     assert len(llm.prompts) == 1
     assert "How can I improve customer retention?" in llm.prompts[0]
+    assert '"retention_score":0.8' in llm.prompts[0]
 
 
 def test_business_workflow_uses_the_injected_llm() -> None:
     """Workflow construction does not create a provider behind the caller's back."""
     llm = RecordingBusinessLLM()
 
-    create_genai_service(llm).handle(business_context())
+    create_genai_service(llm, FakeBusinessContextProvider()).handle(business_context())
 
     assert len(llm.prompts) == 1
 
@@ -77,13 +109,15 @@ def test_business_workflow_uses_the_injected_llm() -> None:
 def test_invalid_llm_output_fails_validation() -> None:
     """Malformed model output cannot silently become a BusinessInsight."""
     with pytest.raises(ValidationError):
-        create_genai_service(InvalidBusinessLLM()).handle(business_context())
+        create_genai_service(
+            InvalidBusinessLLM(), FakeBusinessContextProvider()
+        ).handle(business_context())
 
 
 def test_customer_and_developer_workflows_do_not_use_business_llm() -> None:
     """Only the Business graph invokes the LLM in this milestone."""
     llm = RecordingBusinessLLM()
-    service = create_genai_service(llm)
+    service = create_genai_service(llm, FakeBusinessContextProvider())
 
     customer = service.handle(
         RequestContext(
