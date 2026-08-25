@@ -3,6 +3,7 @@
 import pytest
 
 from app.bootstrap import create_genai_service
+from app.models.business_insight import BusinessInsight
 from app.models.request import GenAIRequest
 from app.models.request_context import RequestContext
 from app.models.user_context import UserContext
@@ -13,6 +14,17 @@ from app.state.business import BusinessState
 from app.state.customer import CustomerState
 from app.state.developer import DeveloperState
 from app.workflows.registry import WorkflowRegistry
+
+
+class FakeBusinessLLM:
+    """Business LLM double used to keep service tests offline."""
+
+    def generate_business_insight(self, prompt: str) -> BusinessInsight:
+        return BusinessInsight(
+            summary="Test insight",
+            key_points=["Test point"],
+            recommended_actions=["Test action"],
+        )
 
 
 def make_context(persona: Persona) -> RequestContext:
@@ -37,7 +49,7 @@ def test_service_executes_the_persona_specific_workflow(
     state_type: type[BusinessState | CustomerState | DeveloperState],
 ) -> None:
     """A request reaches its mapped workspace graph with the correct state."""
-    result = create_genai_service().handle(make_context(persona))
+    result = create_genai_service(FakeBusinessLLM()).handle(make_context(persona))
 
     assert result.workspace is workspace
     assert isinstance(result.state, state_type)
