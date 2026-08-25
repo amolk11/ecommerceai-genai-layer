@@ -54,10 +54,19 @@ class TableProjection:
             raise ValueError("A verified product_id_column is required.")
         return _validate_identifier(self.product_id_column)
 
+    def required_columns(self) -> set[str]:
+        """Return every source column required by this projection and its filter."""
+        columns = {column.column for column in self.columns}
+        if self.user_id_column:
+            columns.add(self.user_filter_column())
+        if self.product_id_column:
+            columns.add(self.product_filter_column())
+        return columns
+
 
 @dataclass(frozen=True)
 class BusinessContextSchemaContract:
-    """Verified column mappings supplied after inspecting the PostgreSQL schema."""
+    """Verified immutable column mappings for the EcommerceAI PostgreSQL schema."""
 
     customer_profile: TableProjection
     customer_behavior: TableProjection
@@ -68,3 +77,93 @@ class BusinessContextSchemaContract:
     favorite_departments: TableProjection
     product_intelligence: TableProjection
     recommendations: TableProjection
+
+
+def ecommerce_business_context_schema() -> BusinessContextSchemaContract:
+    """Return the explicit mapping verified against the EcommerceAI schema export."""
+    return BusinessContextSchemaContract(
+        customer_profile=TableProjection(
+            columns=tuple(
+                ColumnProjection(column)
+                for column in (
+                    "user_id", "total_orders", "customer_tenure", "total_items",
+                    "avg_basket_size", "avg_days_between_orders", "reorder_rate",
+                    "total_reorders", "unique_products", "unique_departments",
+                    "unique_aisles",
+                )
+            ),
+            user_id_column="user_id",
+        ),
+        customer_behavior=TableProjection(
+            columns=tuple(
+                ColumnProjection(column)
+                for column in (
+                    "user_id", "purchase_depth_score", "purchase_depth",
+                    "purchase_regularity_score", "purchase_regularity",
+                    "purchase_loyalty_score", "purchase_loyalty",
+                    "purchase_exploration_score", "purchase_exploration",
+                )
+            ),
+            user_id_column="user_id",
+        ),
+        customer_scores=TableProjection(
+            columns=tuple(
+                ColumnProjection(column)
+                for column in (
+                    "user_id", "loyalty_score", "engagement_score",
+                    "consistency_score", "diversity_score", "customer_health_score",
+                )
+            ),
+            user_id_column="user_id",
+        ),
+        customer_segments=TableProjection(
+            columns=tuple(
+                ColumnProjection(column)
+                for column in (
+                    "user_id", "lifecycle_segment", "value_segment",
+                    "behavior_segment", "confidence",
+                )
+            ),
+            user_id_column="user_id",
+        ),
+        favorite_products=TableProjection(
+            columns=(ColumnProjection("product_id"),), user_id_column="user_id"
+        ),
+        favorite_aisles=TableProjection(
+            columns=tuple(
+                ColumnProjection(column)
+                for column in ("aisle", "preference_score", "purchase_count", "aisle_share")
+            ),
+            user_id_column="user_id",
+        ),
+        favorite_departments=TableProjection(
+            columns=tuple(
+                ColumnProjection(column)
+                for column in (
+                    "department", "preference_score", "purchase_count", "department_share"
+                )
+            ),
+            user_id_column="user_id",
+        ),
+        product_intelligence=TableProjection(
+            columns=tuple(
+                ColumnProjection(column)
+                for column in (
+                    "product_id", "product_name", "department", "aisle",
+                    "purchase_count", "unique_customers", "unique_orders",
+                    "global_health_score", "primary_strength", "primary_weakness",
+                )
+            ),
+            product_id_column="product_id",
+        ),
+        recommendations=TableProjection(
+            columns=(
+                ColumnProjection("product_id_a", "source_product_id"),
+                ColumnProjection("product_id_b", "product_id"),
+                ColumnProjection("recommendation_score"),
+                ColumnProjection("recommendation_rank"),
+                ColumnProjection("lift"),
+            ),
+            product_id_column="product_id_a",
+        ),
+    )

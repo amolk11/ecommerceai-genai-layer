@@ -49,7 +49,7 @@ class PostgresBusinessContextProvider:
             product_ids, self._product_limit
         )
         recommendations = self._repository.get_recommendations(
-            user_id, self._recommendation_limit
+            product_ids, self._recommendation_limit
         )
 
         return BusinessContext(
@@ -115,10 +115,12 @@ class PostgresBusinessContextProvider:
     @staticmethod
     def _recommendation_record(row: Mapping[str, Any]) -> RecommendationRecord:
         return RecommendationRecord(
+            source_product_id=row.get("source_product_id"),
             product_id=row.get("product_id"),
             product_name=row.get("product_name"),
             recommendation_attributes=PostgresBusinessContextProvider._attributes(
-                row, {"user_id", "product_id", "product_name"}
+                row,
+                {"user_id", "source_product_id", "product_id", "product_name"},
             ),
         )
 

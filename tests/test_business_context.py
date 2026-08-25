@@ -4,13 +4,15 @@ from collections.abc import Sequence
 from typing import Any
 
 from app.context.business import PostgresBusinessContextProvider
-from app.data.postgres import PostgresBusinessRepository
+from app.data.postgres import PostgresBusinessRepository, PostgresSettings
 from app.data.protocols import Row
 from app.data.schema import (
     BusinessContextSchemaContract,
     ColumnProjection,
     TableProjection,
+    ecommerce_business_context_schema,
 )
+from app.data.validation import PostgresSchemaValidator, SchemaContractError
 from app.models.business_context import (
     BusinessContext,
     CustomerBehavioralIntelligence,
@@ -61,11 +63,13 @@ class FakeBusinessRepository:
             for index in range(1, 10)
         ]
 
-    def get_recommendations(self, user_id: str, limit: int) -> Sequence[Row]:
+    def get_recommendations(
+        self, source_product_ids: Sequence[int], limit: int
+    ) -> Sequence[Row]:
         self.recommendation_limit = limit
         return [
             {
-                "user_id": user_id,
+                "source_product_id": source_product_ids[0],
                 "product_id": index,
                 "product_name": f"Recommended {index}",
                 "recommendation_score": 0.9,
@@ -114,6 +118,7 @@ def test_provider_maps_serving_and_analytics_records_into_business_context() -> 
     assert context.recommendations[0].recommendation_attributes == {
         "recommendation_score": 0.9
     }
+    assert context.recommendations[0].source_product_id == 1
     assert "serving.customer_profile" in context.data_availability.serving_sources
     assert "analytics.customer_business_scores" in context.data_availability.analytics_sources
 
@@ -188,11 +193,12 @@ def schema_contract() -> BusinessContextSchemaContract:
             ),
             product_id_column="product_key",
         ),
-        recommendations=user_table(
-            (
+        recommendations=TableProjection(
+            columns=(
                 ColumnProjection("product_key", "product_id"),
                 ColumnProjection("display_name", "product_name"),
-            )
+            ),
+            product_id_column="product_key",
         ),
     )
 
@@ -203,7 +209,7 @@ def test_postgres_repository_uses_parameterized_serving_queries() -> None:
     repository = PostgresBusinessRepository(lambda: connection, schema_contract())
 
     profile = repository.get_customer_profile("42")
-    recommendations = repository.get_recommendations("42", 5)
+    recommendations = repository.get_recommendations([7], 5)
 
     assert profile == {"user_id": "42"}
     assert recommendations == [{"user_id": "42"}]
@@ -218,7 +224,7 @@ def test_postgres_repository_uses_parameterized_serving_queries() -> None:
     assert "serving.product_recommendations_top20" in recommendation_query
     assert "SELECT product_key AS product_id, display_name AS product_name" in recommendation_query
     assert "*" not in recommendation_query
-    assert recommendation_parameters == ("42", 5)
+    assert recommendation_parameters == ([7], 5)
 
 
 def test_schema_contract_rejects_an_unsafe_identifier() -> None:
@@ -234,3 +240,115 @@ def test_schema_contract_rejects_an_unsafe_identifier() -> None:
         assert "Unsafe SQL identifier" in str(exc)
     else:
         raise AssertionError("Unsafe schema identifier was accepted")
+
+
+class ValidationCursor:
+    """Read-only information_schema cursor double."""
+
+    def __init__(
+        self, missing_table: bool = False, missing_column: str | None = None
+    ) -> None:
+        self.missing_table = missing_table
+        self.missing_column = missing_column
+        self.parameters: tuple[Any, ...] | None = None
+
+    def __enter__(self) -> "ValidationCursor":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def execute(self, query: str, parameters: tuple[Any, ...]) -> None:
+        self.parameters = parameters
+
+    def fetchone(self) -> dict[str, int] | None:
+        return None if self.missing_table else {"exists": 1}
+
+    def fetchall(self) -> list[dict[str, str]]:
+        assert self.parameters is not None
+        return [
+            {"column_name": column}
+            for column in self.parameters[2]
+            if column != self.missing_column
+        ]
+
+
+class ValidationConnection:
+    """Connection double used only for schema contract validation."""
+
+    def __init__(self, cursor: ValidationCursor) -> None:
+        self._cursor = cursor
+
+    def __enter__(self) -> "ValidationConnection":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def cursor(self) -> ValidationCursor:
+        return self._cursor
+
+
+def test_schema_validator_checks_only_contract_tables_and_columns() -> None:
+    """The validator uses read-only information_schema checks for the contract."""
+    cursor = ValidationCursor()
+    validator = PostgresSchemaValidator(
+        lambda: ValidationConnection(cursor), schema_contract()
+    )
+
+    validator.validate()
+
+
+def test_schema_validator_reports_a_missing_table() -> None:
+    """Missing required tables produce a clear contract error."""
+    validator = PostgresSchemaValidator(
+        lambda: ValidationConnection(ValidationCursor(missing_table=True)),
+        schema_contract(),
+    )
+
+    try:
+        validator.validate()
+    except SchemaContractError as exc:
+        assert "Missing required table" in str(exc)
+    else:
+        raise AssertionError("Missing table was accepted")
+
+
+def test_schema_validator_reports_a_missing_column() -> None:
+    """Missing contract columns produce a clear schema error."""
+    validator = PostgresSchemaValidator(
+        lambda: ValidationConnection(ValidationCursor(missing_column="customer_key")),
+        schema_contract(),
+    )
+
+    try:
+        validator.validate()
+    except SchemaContractError as exc:
+        assert "Missing required column" in str(exc)
+        assert "customer_key" in str(exc)
+    else:
+        raise AssertionError("Missing column was accepted")
+
+
+def test_code_owned_contract_uses_verified_ecommerce_columns() -> None:
+    """Production mapping needs no JSON environment variable or inferred fields."""
+    contract = ecommerce_business_context_schema()
+
+    assert contract.customer_profile.required_columns() == {
+        "user_id", "total_orders", "customer_tenure", "total_items",
+        "avg_basket_size", "avg_days_between_orders", "reorder_rate",
+        "total_reorders", "unique_products", "unique_departments", "unique_aisles",
+    }
+    assert contract.recommendations.product_filter_column() == "product_id_a"
+    assert contract.recommendations.select_list() == (
+        "product_id_a AS source_product_id, product_id_b AS product_id, "
+        "recommendation_score, recommendation_rank, lift"
+    )
+
+
+def test_postgres_settings_normalizes_sqlalchemy_psycopg_urls() -> None:
+    """psycopg receives a native PostgreSQL URL without exposing credentials."""
+    settings = PostgresSettings("postgresql+psycopg://user:secret@host/database")
+
+    assert settings.dsn == "postgresql://user:secret@host/database"
+    assert PostgresSettings("postgres://host/database").dsn == "postgres://host/database"

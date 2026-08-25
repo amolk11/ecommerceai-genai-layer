@@ -37,6 +37,7 @@ class RecommendationRecord(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
+    source_product_id: int | None = None
     product_id: int | None = None
     product_name: str | None = None
     recommendation_attributes: dict[str, Any] = Field(default_factory=dict)

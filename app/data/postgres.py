@@ -9,22 +9,51 @@ from app.data.protocols import BusinessDataRepository, Row
 from app.data.schema import BusinessContextSchemaContract, TableProjection
 
 
+def normalize_postgres_dsn(dsn: str) -> str:
+    """Normalize supported PostgreSQL URL schemes for psycopg without logging them."""
+    sqlalchemy_prefix = "postgresql+psycopg://"
+    if dsn.startswith(sqlalchemy_prefix):
+        return "postgresql://" + dsn.removeprefix(sqlalchemy_prefix)
+    if dsn.startswith(("postgresql://", "postgres://")):
+        return dsn
+    raise ValueError(
+        "DATABASE_URL must use postgresql://, postgres://, or postgresql+psycopg://."
+    )
+
+
 @dataclass(frozen=True)
 class PostgresSettings:
     """PostgreSQL connection settings loaded from the environment."""
 
     dsn: str
 
+    def __post_init__(self) -> None:
+        """Store the driver-compatible form while keeping credentials opaque."""
+        object.__setattr__(self, "dsn", normalize_postgres_dsn(self.dsn))
+
     @classmethod
     def from_environment(cls) -> "PostgresSettings":
         """Load the connection string without hardcoding credentials."""
-        dsn = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_DSN")
+        dsn = os.getenv("DATABASE_URL")
         if not dsn:
-            raise RuntimeError("DATABASE_URL or POSTGRES_DSN must be set for PostgreSQL.")
+            raise RuntimeError("DATABASE_URL must be set for PostgreSQL.")
         return cls(dsn=dsn)
 
 
 ConnectionFactory = Callable[[], Any]
+
+
+def create_connection_factory(settings: PostgresSettings) -> ConnectionFactory:
+    """Create a lazy, non-global psycopg connection factory."""
+    def connect() -> Any:
+        try:
+            import psycopg
+            from psycopg.rows import dict_row
+        except ImportError as exc:
+            raise RuntimeError("psycopg is required for PostgreSQL data access.") from exc
+        return psycopg.connect(settings.dsn, row_factory=dict_row)
+
+    return connect
 
 
 class PostgresBusinessRepository(BusinessDataRepository):
@@ -45,15 +74,7 @@ class PostgresBusinessRepository(BusinessDataRepository):
         schema_contract: BusinessContextSchemaContract,
     ) -> "PostgresBusinessRepository":
         """Create a repository with a lazy psycopg connection factory."""
-        def connect() -> Any:
-            try:
-                import psycopg
-                from psycopg.rows import dict_row
-            except ImportError as exc:
-                raise RuntimeError("psycopg is required for PostgreSQL data access.") from exc
-            return psycopg.connect(settings.dsn, row_factory=dict_row)
-
-        return cls(connect, schema_contract)
+        return cls(create_connection_factory(settings), schema_contract)
 
     def get_customer_profile(self, user_id: str) -> Row | None:
         return self._fetch_one(
@@ -117,12 +138,16 @@ class PostgresBusinessRepository(BusinessDataRepository):
             (list(product_ids), limit),
         )
 
-    def get_recommendations(self, user_id: str, limit: int) -> Sequence[Row]:
+    def get_recommendations(
+        self, source_product_ids: Sequence[int], limit: int
+    ) -> Sequence[Row]:
+        if not source_product_ids:
+            return []
         return self._fetch_all(
-            self._user_query(
+            self._product_query(
                 "serving.product_recommendations_top20", self._schema.recommendations
             ),
-            (user_id, limit),
+            (list(source_product_ids), limit),
         )
 
     def _fetch_one(self, query: str, parameters: tuple[Any, ...]) -> Row | None:
